@@ -1,9 +1,9 @@
 # Path to the raw dataset used in the analysis
-data_file: "data_pce.csv"
+data_file: "../../data/data_pce.csv"
 
-# List of exposure variables (each with a name and type)
+# List of predictors variables (each with a name and type)
 # These are the primary variables for which you will estimate causal effects
-exposures:
+predictors:
   - name: sbp                 # Systolic blood pressure (continuous)
     type: continuous
   - name: smoker_current      # Currently smoking (binary yes/no)
@@ -37,4 +37,13 @@ outcome:
 missingness_indicators:
   - bp_treated
   - smoker_current
-  
+
+# -------------------------------------------------------------------------
+# Population-level outcome probabilities
+#   These define Pr(Y=1) and Pr(Y=0) in the *target population*,
+#   which are used to compute the causal likelihood ratio weights π(Z).
+#   They may differ from the sample fractions (Pr(Y|S=1)).
+# -------------------------------------------------------------------------
+population_priors:
+  pY1: 0.02   # e.g., 2% autism cases in the target population
+  pY0: 0.94   # e.g., 94% "population" cases in the target population

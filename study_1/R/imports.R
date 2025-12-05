@@ -1,5 +1,11 @@
 # imports.R
 
+# Load the custom functions
+source("R/prepare_data.R")
+source("R/compute_effects.R")
+source("R/model_diagnostics.R")
+source("R/plots.R")
+
 # Toggle: install missing packages automatically
 INSTALL_MISSING <- TRUE
 
@@ -10,7 +16,18 @@ pkgs <- c(
   "dbarts",
   "yaml",
   "tidyverse",
-  "mice"
+  "mice",
+  "coda",
+  "knitr",
+  "officer",
+  "flextable",
+  "kableExtra",
+  "patchwork",
+  "forcats",
+  "iml",
+  "tibble",
+  "purrr",
+  "ggbeeswarm"
   )
 
 # Pick a CRAN mirror if none set (avoids interactive prompt)
