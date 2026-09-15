@@ -1,5 +1,6 @@
 # Path to the raw dataset
-data_file: "../../data/data_pce.csv"
+#data_file: "../data/data_pce.csv"
+data_file: "../data/analytic_df.csv"
 
 # Predictors (factors of interest)
 # These are the variables whose causal effects we estimate
