@@ -37,7 +37,12 @@ set.seed(20260322)
 config <- yaml::read_yaml("config_1.yaml")
 
 # Raw data and prepare data types
-raw_df <- readr::read_csv(config$data_file)
+data_path <- fs::path_abs(config$data_file)
+if (!fs::file_exists(data_path)) {
+  stop("Configured data file does not exist: ", data_path)
+}
+df <- readr::read_csv(data_path, show_col_types = FALSE)
+raw_df <- df
 prep <- coerce_variable_types(raw_df, config)
 coerced_df <- prep$coerced_df
 predictor_stats_df <- prep$predictor_stats_df

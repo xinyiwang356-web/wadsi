@@ -9,6 +9,7 @@ source("R/sensitivity/compare_bart_software.R")
 source("R/sensitivity/cross_validation.R")
 source("R/sensitivity/sens_unmeas_conf.R")
 source("R/sensitivity/proxy_models.R")
+source("R/deployment.R")
 
 # Toggle automatic installation of missing packages
 INSTALL_MISSING <- TRUE

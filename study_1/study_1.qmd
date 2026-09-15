@@ -66,7 +66,12 @@ With the configuration in hand, we read in the dataset it points to.
 
 ```{r}
 # Load data
-raw_df <- readr::read_csv(config$data_file)
+data_path <- fs::path_abs(config$data_file)
+if (!fs::file_exists(data_path)) {
+  stop("Configured data file does not exist: ", data_path)
+}
+df <- readr::read_csv(data_path, show_col_types = FALSE)
+raw_df <- df
 ```
 
 We then extract the variables that define the analysis. The predictors are the early-life factors whose effects we study. The covariates are used to adjust for confounding. The outcome is the response of interest.
@@ -280,6 +285,11 @@ if (file.exists(model_path)) {
   bart_fit$fit$storeState()
   saveRDS(bart_fit, model_path)
 }
+
+# Export only the fitted tree structures and scoring metadata. The deployment
+# artifact does not contain x_train, y_train, or fitted training predictions.
+deployment_model <- export_bart_model(bart_fit, x_train, final_config)
+saveRDS(deployment_model, "outputs/models/reference_outcome_bart_deployment.rds")
 ```
 
 The model uses eight parallel chains with 30,000 burn-in iterations and 12,000
