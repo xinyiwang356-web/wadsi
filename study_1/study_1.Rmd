@@ -1,18 +1,17 @@
 ---
 title: "Causal inference / SEED"
 author: "Amy Cochran"
-format:
-  html:
+output:
+  html_document:
     css: style.css
     theme: cosmo
     toc: true
-    toc-depth: 3
-editor: visual
-execute:
-  echo: true
-  warning: false
-  message: false
-  seed: 20260322
+    toc_depth: 3
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
 ---
 
 # Introduction
