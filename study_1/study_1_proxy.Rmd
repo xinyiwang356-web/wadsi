@@ -1,24 +1,23 @@
 ---
 title: "Proxy-variable analysis for study 1"
 author: "Amy Cochran"
-format:
-  html:
+output:
+  html_document:
     css: style.css
     theme: cosmo
     toc: true
-    toc-depth: 3
-editor: visual
-execute:
-  echo: true
-  warning: false
-  message: false
-  seed: 20260322
+    toc_depth: 3
+knitr:
+  opts_chunk:
+    echo: true
+    warning: false
+    message: false
 ---
 
 # Proxy-variable analysis
 
 This document is a separate workspace for developing the proxy-variable
-analysis. It is not sourced by `study_1_sensitivity.qmd` and therefore does not
+analysis. It is not sourced by `study_1_sensitivity.Rmd` and therefore does not
 affect the completed sensitivity analyses or their render.
 
 The initial implementation is restricted to a genuinely binary focal
