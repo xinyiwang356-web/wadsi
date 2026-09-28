@@ -1,0 +1,2 @@
+model_path,export_path,outcome_var,n_rows,brier_score,negative_log_likelihood
+outputs/models/reference_outcome_bart.rds,outputs/models/reference_outcome_bart_deployment.rds,diabetes,4723,0.186576067503909,0.5511990501355234
