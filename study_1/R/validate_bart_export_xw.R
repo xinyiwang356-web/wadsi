@@ -6,21 +6,15 @@ setwd("C:/Users/XXW306/Cochran_REPO/wadsi/study_1")
 source("R/imports.R")
 source("R/deployment.R")
 
-# --- Load saved model and deployment export ---
-fit_path <- "outputs/models/reference_outcome_bart.rds"
+# --- Load the sanitized deployment export ---
 deploy_path <- "outputs/models/reference_outcome_bart_deployment.rds"
 
-if (!file.exists(fit_path)) {
-  stop("Saved training fit not found: ", fit_path)
-}
 if (!file.exists(deploy_path)) {
   stop("Saved deployment export not found: ", deploy_path)
 }
 
-bart_fit <- readRDS(fit_path)
 deployment_model <- readRDS(deploy_path)
 
-cat("Loaded full fit:", fit_path, "\n")
 cat("Loaded sanitized export:", deploy_path, "\n")
 
 # --- Example EHR-like validation data ---
@@ -80,7 +74,6 @@ print(head(predicted, 10))
 
 # Optional: save a small validation summary
 validation_summary <- data.frame(
-  model_path = fit_path,
   export_path = deploy_path,
   outcome_var = outcome_var,
   n_rows = nrow(ehr_data),
