@@ -2,9 +2,10 @@
 # Run from study_1, or set ASD_BIRTH_DATA to another CSV or TSV path.
 
 local_data_paths <- c(
-  file.path("data", "DHS_vs_ASD_LABEL_merged_deid.csv"),
-  file.path("..", "data", "DHS_vs_ASD_LABEL_merged_deid.csv"),
-  file.path("wadsi", "data", "DHS_vs_ASD_LABEL_merged_deid.csv")
+  file.path("Z:", "data_requests", "cochran4", "2025-1294", "Validation", "DHS_deid.csv"),
+  file.path("data", "DHS_deid.csv"),
+  file.path("..", "data", "DHS_deid.csv"),
+  file.path("wadsi", "data", "DHS_deid.csv")
 )
 existing_local_path <- local_data_paths[file.exists(local_data_paths)]
 default_input <- if (length(existing_local_path) > 0L) {
