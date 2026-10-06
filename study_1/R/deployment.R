@@ -11,13 +11,20 @@ export_bart_model <- function(bart_fit, x_train, config) {
   tree_data <- dbarts::extract(bart_fit, type = "trees")
   tree_data$n <- NULL
   model_matrix <- dbarts::makeModelMatrixFromDataFrame(x_train)
+  binary_offset <- as.numeric(bart_fit$binaryOffset)
+  if (length(binary_offset) == 0L || any(!is.finite(binary_offset))) {
+    stop("The BART fit has an invalid binary offset.")
+  }
+  if (length(binary_offset) > 1L && any(binary_offset != binary_offset[1])) {
+    stop("A row-specific binary offset cannot be exported for new-data scoring.")
+  }
 
   list(
     format_version = 1L,
     contains_training_data = FALSE,
     package = "dbarts",
     link = "probit",
-    binary_offset = bart_fit$binaryOffset,
+    binary_offset = binary_offset[1],
     input_names = names(x_train),
     factor_levels = lapply(x_train, function(x) if (is.factor(x)) levels(x) else NULL),
     model_matrix_drop = attr(model_matrix, "drop"),
@@ -67,6 +74,9 @@ predict_bart_export <- function(model, newdata) {
 
     visit <- function(rows, active) {
       if (tree$var[rows[1]] == -1L) {
+        if (any(active < 1L | active > length(predictions))) {
+          stop("The BART tree walk produced an out-of-range row index.")
+        }
         predictions[active] <<- tree$value[rows[1]]
         return(1L)
       }
@@ -79,15 +89,20 @@ predict_bart_export <- function(model, newdata) {
     }
 
     visit(seq_len(nrow(tree)), indices)
+    if (length(predictions) != nrow(newdata)) {
+      stop("The BART tree walk returned the wrong number of predictions.")
+    }
     predictions
   }
 
   latent_draws <- vapply(draw_groups, function(group) {
     draw_trees <- trees[group, , drop = FALSE]
     tree_groups <- split(seq_len(nrow(draw_trees)), draw_trees$tree)
-    rowSums(vapply(tree_groups, function(tree_rows) {
+    tree_predictions <- vapply(tree_groups, function(tree_rows) {
       predict_tree(draw_trees[tree_rows, , drop = FALSE], seq_len(nrow(newdata)))
-    }, numeric(nrow(newdata)))) + model$binary_offset
+    }, numeric(nrow(newdata)))
+    draw_prediction <- rowSums(tree_predictions)
+    draw_prediction + model$binary_offset
   }, numeric(nrow(newdata)))
 
   probability_draws <- pnorm(t(latent_draws))
