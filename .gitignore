@@ -9,3 +9,5 @@ old/
 
 # Fitted models derived from study data
 /study_1/outputs/models/
+
+data/*.csv
