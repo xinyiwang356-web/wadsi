@@ -1,16 +1,6 @@
 # Synthetic-only BART workflow example.
 # The simulated outcome is for testing the pipeline, not for ASD inference.
 
-input_path <- file.path(
-  Sys.getenv("USERPROFILE", unset = path.expand("~")),
-  "Downloads",
-  "synthetic_validation_data.csv"
-)
-if (!file.exists(input_path)) {
-  stop("Synthetic input file not found: ", input_path)
-}
-input_path <- normalizePath(input_path, winslash = "/", mustWork = TRUE)
-
 project_candidates <- c(".", "study_1", file.path("wadsi", "study_1"))
 existing_project <- project_candidates[vapply(
   project_candidates,
@@ -22,6 +12,12 @@ if (length(existing_project) == 0L) {
 }
 project_dir <- normalizePath(existing_project[[1]], winslash = "/", mustWork = TRUE)
 setwd(project_dir)
+demo_dir <- file.path(project_dir, "synthetic_demo")
+input_path <- file.path(demo_dir, "data", "synthetic_validation_data.csv")
+if (!file.exists(input_path)) {
+  stop("Synthetic input file not found: ", input_path)
+}
+input_path <- normalizePath(input_path, winslash = "/", mustWork = TRUE)
 
 if (!requireNamespace("readr", quietly = TRUE) ||
     !requireNamespace("dbarts", quietly = TRUE)) {
@@ -31,11 +27,7 @@ source("R/deployment.R")
 
 output_dir <- Sys.getenv(
   "SYNTHETIC_ASD_OUTPUT_DIR",
-  unset = file.path(
-    Sys.getenv("USERPROFILE", unset = path.expand("~")),
-    "Downloads",
-    "synthetic_asd_bart_demo"
-  )
+  unset = file.path(demo_dir, "synthetic_asd_bart_demo")
 )
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 

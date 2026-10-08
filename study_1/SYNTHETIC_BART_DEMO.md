@@ -2,8 +2,8 @@
 
 This is an end-to-end smoke test of the project's `dbarts` fit, export, and
 prediction pipeline. It reads only
-`%USERPROFILE%\Downloads\synthetic_validation_data.csv`; it does not load the
-SEED or other project datasets.
+`study_1/synthetic_demo/data/synthetic_validation_data.csv`; it does not load
+the SEED or other project datasets.
 
 The input has no ASD outcome column. The script therefore generates a
 reproducible `synthetic_asd_flag` from a simple, documented simulation using
@@ -29,7 +29,7 @@ pipeline check, not model-quality comparisons.
 ## Outputs
 
 By default, files are written to
-`%USERPROFILE%\Downloads\synthetic_asd_bart_demo`:
+`study_1/synthetic_demo/synthetic_asd_bart_demo`:
 
 - `synthetic_asd_bart_deployment.rds`: exported model with no training rows
 - `synthetic_holdout_metrics.csv`: synthetic holdout Brier score and log loss
@@ -37,5 +37,6 @@ By default, files are written to
 - `synthetic_dataset_predictions.csv`: one synthetic score per input row, with no
   record identifiers
 
-Set `SYNTHETIC_ASD_OUTPUT_DIR` to override the output folder. The input CSV and
-generated output files are intentionally not part of the repository.
+Set `SYNTHETIC_ASD_OUTPUT_DIR` to override the output folder. This repository
+includes the synthetic input and generated demo outputs so the complete example
+is reproducible and inspectable; none of these files are real patient data.

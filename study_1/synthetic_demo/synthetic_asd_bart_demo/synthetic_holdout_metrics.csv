@@ -1,0 +1,2 @@
+brier_score,negative_log_likelihood,n_holdout,synthetic_asd_prevalence,outcome,interpretation
+0.030977491881577952,0.1416382368015664,2000,0.032,synthetic_asd_flag,Synthetic demonstration only; not clinical validation.
