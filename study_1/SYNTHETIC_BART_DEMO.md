@@ -5,7 +5,8 @@ prediction pipeline. It reads only
 `study_1/synthetic_demo/data/synthetic_validation_data.csv`; it does not load
 the SEED or other project datasets.
 
-The input has no ASD outcome column. The script therefore generates a
+Our DHS/EHR integrated dataset has no ASD label. Synthetic data created from 
+its codebook does not have ASD column. The script therefore generates a
 reproducible `synthetic_asd_flag` from a simple, documented simulation using
 mother age, sex, and `anom_downs`. The simulated probability is
 `logit^-1(-3.6 + 0.45 * male + 0.2 * standardized_mother_age + 0.8 * anom_downs)`,
