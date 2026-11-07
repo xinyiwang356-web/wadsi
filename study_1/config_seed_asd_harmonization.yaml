@@ -281,3 +281,57 @@ outcome:
     No ASD outcome is listed in the DHS codebook. This is not required to
     generate predictions, but labeled outcomes are required to assess
     predictive performance or validate calibration.
+
+# Variable roles for the SEED-only chained-equation imputer. The 15 targets
+# are present in the SEED codebook but have no DHS mapping; they are therefore
+# imputed in DHS using relationships learned from SEED. The overlap variables
+# are the nine mapped fields above. Their codebook missingness is retained.
+imputation:
+  overlap_variables:
+    - dr_gawks
+    - gest_dm_bin
+    - DR_PREGHTN
+    - dr_agebir_mx
+    - dr_agebir_fx
+    - dr_sex_cx
+    - dr_prevlb_br_3c
+    - dr_biredu_mx_5c
+    - dr_race_mx_5c
+  target_variables:
+    - DR_INF_FV_PG_MX
+    - dr_anx_mmh_mx
+    - dr_dep_mmh_mx
+    - dr_pg_incpovrat_up_4c
+    - DR_pgsASD_CX
+    - DR_gwaPC1_CX
+    - DR_gwaPC2_CX
+    - DR_gwaPC3_CX
+    - DR_gwaPC4_CX
+    - DR_gwaPC5_CX
+    - DR_gwaPC6_CX
+    - DR_gwaPC7_CX
+    - DR_gwaPC8_CX
+    - DR_gwaPC9_CX
+    - DR_gwaPC10_CX
+  variable_types:
+    DR_INF_FV_PG_MX: categorical
+    dr_anx_mmh_mx: categorical
+    dr_dep_mmh_mx: categorical
+    dr_pg_incpovrat_up_4c: categorical
+    DR_pgsASD_CX: continuous
+    DR_gwaPC1_CX: continuous
+    DR_gwaPC2_CX: continuous
+    DR_gwaPC3_CX: continuous
+    DR_gwaPC4_CX: continuous
+    DR_gwaPC5_CX: continuous
+    DR_gwaPC6_CX: continuous
+    DR_gwaPC7_CX: continuous
+    DR_gwaPC8_CX: continuous
+    DR_gwaPC9_CX: continuous
+    DR_gwaPC10_CX: continuous
+  categories:
+    gest_dm_bin: [0, 1, 2]
+    DR_INF_FV_PG_MX: [0, 1]
+    dr_anx_mmh_mx: [0, 1]
+    dr_dep_mmh_mx: [0, 1]
+    dr_pg_incpovrat_up_4c: [1, 2, 3, 4]
