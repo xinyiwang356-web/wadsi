@@ -1,0 +1,54 @@
+# Demo-only Seed-style configuration for synthetic_seed_asd_data.csv.
+# synthetic_asd_flag is simulated and is not observed ASD status. It was
+# generated with seed 20261102 from a Bernoulli draw with
+# logit(p) = -2.35 + .035*(maternal_age-28) + .015*(paternal_age-31)
+#            - .08*(gestational_weeks-39) + .25*(diabetes==1)
+#            + .45*(diabetes==2) + .25*hypertension
+#            + .08*(parity==2) + .12*(parity==3).
+data_file: "synthetic_seed_asd_data.csv"
+
+# Early-life factors used as predictors in the one-at-a-time analyses.
+predictors:
+  - name: dr_agebir_mx
+    type: continuous
+  - name: dr_agebir_fx
+    type: continuous
+  - name: dr_gawks
+    type: continuous
+  - name: gest_dm_bin
+    type: categorical
+  - name: DR_PREGHTN
+    type: categorical
+
+# Available demographic and birth-history adjustment variables.
+covariates:
+  - name: dr_sex_cx
+    type: categorical
+  - name: dr_prevlb_br_3c
+    type: categorical
+  - name: dr_biredu_mx_5c
+    type: categorical
+  - name: dr_race_mx_5c
+    type: categorical
+
+outcome:
+  name: synthetic_asd_flag
+  type: categorical
+  reference: 0
+
+# These categorical variables use the explicit Missing factor level.
+missingness_indicators:
+  - dr_biredu_mx_5c
+  - dr_race_mx_5c
+
+# Demo-only assumed prevalence; not an estimate of population ASD prevalence.
+population_priors:
+  pY1: 0.10
+  pY0: 0.90
+
+predictor_labels:
+  dr_agebir_mx: "Synthetic maternal age at birth, years"
+  dr_agebir_fx: "Synthetic paternal age at birth, years"
+  dr_gawks: "Synthetic gestational age, weeks"
+  gest_dm_bin: "Synthetic gestational diabetes category"
+  DR_PREGHTN: "Synthetic pregnancy hypertension indicator"

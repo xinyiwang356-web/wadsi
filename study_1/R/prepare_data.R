@@ -119,6 +119,196 @@ coerce_variable_types <- function(raw_df, config) {
 
 
 # -----------------------------------------------------------------------------
+# harmonize_dhs_to_seed.R
+#
+# Convert the nine shared DHS source fields to the Seed variable names and
+# categories described in config_seed_asd_harmonization.yaml.
+# Example from the study_1 directory:
+#   dhs_seed_df <- harmonize_dhs_to_seed(
+#     dhs_df,
+#     "config_seed_asd_harmonization.yaml"
+#   )
+# -----------------------------------------------------------------------------
+normalize_harmonization_source <- function(x) {
+  values <- trimws(as.character(x))
+  missing_values <- is.na(x) |
+    is.na(values) |
+    tolower(values) %in% c("", "na", "n/a", "null", "missing")
+  values[missing_values] <- NA_character_
+  values
+}
+
+recode_harmonization_factor <- function(source, mapping, categories, variable) {
+  source_values <- normalize_harmonization_source(source)
+  map_keys <- names(mapping)
+  if (is.null(map_keys) || length(map_keys) == 0L) {
+    stop("No source_to_seed mapping configured for ", variable, ".", call. = FALSE)
+  }
+
+  unknown_values <- unique(
+    source_values[!is.na(source_values) & !source_values %in% map_keys]
+  )
+  if (length(unknown_values) > 0L) {
+    stop(
+      "Unmapped source value(s) for ", variable, ": ",
+      paste(unknown_values, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  recoded <- rep(NA_integer_, length(source_values))
+  factor_levels <- as.integer(names(categories))
+  for (key in map_keys) {
+    selected <- !is.na(source_values) & source_values == key
+    target <- mapping[[key]]
+    if (length(target) > 0L && !is.null(target)) {
+      target_code <- as.integer(target)
+      if (length(target_code) != 1L || is.na(target_code) ||
+          !target_code %in% factor_levels) {
+        stop(
+          "Invalid Seed category configured for source code ", key,
+          " in ", variable, ".",
+          call. = FALSE
+        )
+      }
+      recoded[selected] <- target_code
+    }
+  }
+
+  factor(
+    recoded,
+    levels = factor_levels,
+    ordered = FALSE
+  )
+}
+
+harmonize_dhs_to_seed <- function(
+    dhs_df,
+    config_path = "config_seed_asd_harmonization.yaml") {
+  required_variables <- c(
+    "dr_agebir_fx",
+    "dr_agebir_mx",
+    "dr_gawks",
+    "DR_PREGHTN",
+    "gest_dm_bin",
+    "dr_biredu_mx_5c",
+    "dr_prevlb_br_3c",
+    "dr_race_mx_5c",
+    "dr_sex_cx"
+  )
+  config <- yaml::read_yaml(config_path)
+  variable_specs <- config$variables[required_variables]
+  missing_specs <- required_variables[vapply(variable_specs, is.null, logical(1))]
+  if (length(missing_specs) > 0L) {
+    stop(
+      "Harmonization config is missing variable specification(s): ",
+      paste(missing_specs, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  required_sources <- unique(unlist(
+    lapply(variable_specs, `[[`, "dhs_source_columns"),
+    use.names = FALSE
+  ))
+  missing_sources <- setdiff(required_sources, names(dhs_df))
+  if (length(missing_sources) > 0L) {
+    stop(
+      "DHS data is missing required source column(s): ",
+      paste(missing_sources, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  harmonized <- data.frame(row.names = seq_len(nrow(dhs_df)))
+  diabetes_precedence_rows <- integer()
+
+  for (variable in required_variables) {
+    spec <- variable_specs[[variable]]
+    recode <- spec$recode_to_seed
+
+    if (identical(spec$type, "continuous")) {
+      source_column <- spec$dhs_source_columns[[1]]
+      source_values <- normalize_harmonization_source(dhs_df[[source_column]])
+      numeric_values <- suppressWarnings(as.numeric(source_values))
+      invalid_values <- unique(
+        source_values[!is.na(source_values) & is.na(numeric_values)]
+      )
+      if (length(invalid_values) > 0L) {
+        stop(
+          "Non-numeric source value(s) in ", source_column, ": ",
+          paste(invalid_values, collapse = ", "),
+          call. = FALSE
+        )
+      }
+      harmonized[[variable]] <- numeric_values
+    } else if (identical(recode$strategy, "diabetes_indicators")) {
+      preexisting_column <- recode$preexisting_source_column
+      pregnancy_column <- recode$during_pregnancy_source_column
+      preexisting <- normalize_harmonization_source(dhs_df[[preexisting_column]])
+      during_pregnancy <- normalize_harmonization_source(dhs_df[[pregnancy_column]])
+
+      invalid_preexisting <- unique(
+        preexisting[!is.na(preexisting) & !preexisting %in% c("0", "1")]
+      )
+      invalid_pregnancy <- unique(
+        during_pregnancy[!is.na(during_pregnancy) &
+          !during_pregnancy %in% c("0", "1")]
+      )
+      if (length(invalid_preexisting) > 0L || length(invalid_pregnancy) > 0L) {
+        stop(
+          "Expected 0/1 values in ", preexisting_column, " and ",
+          pregnancy_column, ".",
+          call. = FALSE
+        )
+      }
+
+      both_known <- !is.na(preexisting) & !is.na(during_pregnancy)
+      both_zero <- both_known & preexisting == "0" & during_pregnancy == "0"
+      preexisting_positive <- !is.na(preexisting) & preexisting == "1"
+      pregnancy_only <- both_known &
+        preexisting == "0" & during_pregnancy == "1"
+      both_positive <- both_known &
+        preexisting == "1" & during_pregnancy == "1"
+
+      recoded <- rep(NA_integer_, nrow(dhs_df))
+      recoded[both_zero] <- 0L
+      recoded[preexisting_positive] <- 1L
+      recoded[pregnancy_only] <- 2L
+      diabetes_precedence_rows <- which(both_positive)
+
+      categories <- recode$seed_categories
+      harmonized[[variable]] <- factor(
+        recoded,
+        levels = as.integer(names(categories))
+      )
+    } else {
+      source_column <- recode$source_column
+      if (is.null(source_column) || !source_column %in% names(dhs_df)) {
+        stop(
+          "No valid source_column configured for ", variable, ".",
+          call. = FALSE
+        )
+      }
+      harmonized[[variable]] <- recode_harmonization_factor(
+        dhs_df[[source_column]],
+        recode$source_to_seed,
+        recode$seed_categories,
+        variable
+      )
+    }
+  }
+
+  attr(harmonized, "harmonization_diagnostics") <- list(
+    preexisting_priority_gest_dm_bin_rows = diabetes_precedence_rows,
+    preexisting_priority_gest_dm_bin_count = length(diabetes_precedence_rows)
+  )
+
+  harmonized
+}
+
+
+# -----------------------------------------------------------------------------
 # add_missingness_indicators.R
 #
 # Description:

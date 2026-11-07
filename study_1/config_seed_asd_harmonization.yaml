@@ -1,0 +1,283 @@
+# DHS-to-SEED source-column map and recode specification.
+# Executable recoding is implemented by harmonize_dhs_to_seed() in
+# R/prepare_data.R. Validate definitions and categories before substantive use.
+seed_config: config_seed_asd.yaml
+scoring_note: >
+  The scoring input must contain all configured predictors and covariates.
+  Do not score the full Seed model until unavailable variables are obtained
+  and pending recodes are defined and validated. The scoring data do not need
+  the outcome column; labeled ASD outcomes are needed for validation.
+status_legend:
+  codebook_supported_candidate: >
+    DHS label supports the conceptual match; confirm units, population, and
+    categorical values/levels before scoring.
+  recode_required: >
+    Source column(s) are plausible, but must be transformed to Seed's exact
+    definition/categories using both codebooks.
+  unavailable: No equivalent column is listed in the supplied DHS codebook.
+
+variables:
+  dr_gawks:
+    seed_source_columns: [dr_gawks]
+    dhs_source_columns: [OE_GESTATION_WEEKS]
+    source_columns: [OE_GESTATION_WEEKS]
+    type: continuous
+    status: codebook_supported_candidate
+    note: >
+      Labeled "Week, Obstetric Estimate at Delivery"; supports gestational age
+      in weeks. Confirm the Seed measure's source/definition and units.
+  gest_dm_bin:
+    seed_source_columns: [gest_dm_bin]
+    dhs_source_columns: [MR_DIAB, MR_DIAB_GEST]
+    source_columns: [MR_DIAB, MR_DIAB_GEST]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      strategy: diabetes_indicators
+      preexisting_source_column: MR_DIAB
+      during_pregnancy_source_column: MR_DIAB_GEST
+      preexisting_priority: true
+      both_positive: 1
+      seed_categories:
+        0: "No indication of diabetes before or during index pregnancy"
+        1: "Pre-existing diabetes"
+        2: "Diabetes during pregnancy"
+    note: >
+      DHS MR_DIAB and MR_DIAB_GEST are binary indicators, while the Seed
+      variable has three levels. Map both-zero to 0, any MR_DIAB-positive
+      record (including both-positive) to 1, and MR_DIAB_GEST-only to 2.
+      Pre-existing positive takes precedence even if MR_DIAB_GEST is missing.
+      Other records with either input missing remain missing. The number and
+      row indices of both-positive records, assigned to category 1 by this
+      precedence rule, are attached as harmonization_diagnostics. Confirm the
+      indicator definitions before substantive use.
+  DR_PREGHTN:
+    seed_source_columns: [DR_PREGHTN]
+    dhs_source_columns: [MR_HYPERT_PREG]
+    source_columns: [MR_HYPERT_PREG]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      source_column: MR_HYPERT_PREG
+      source_to_seed:
+        "0": 0
+        "1": 1
+      seed_categories:
+        0: "No indication of hypertension during index pregnancy"
+        1: "Indication of hypertension during index pregnancy"
+    note: >
+      Map the DHS 0/1 pregnancy-hypertension indicator to the Seed 0/1
+      categories. This does not independently reconstruct the Seed's onset-age
+      or active-during-pregnancy criteria; validate that MR_HYPERT_PREG
+      represents the same case definition.
+  DR_INF_FV_PG_MX:
+    source_columns: []
+    status: unavailable
+    note: The listed DHS columns do not identify infection with fever during pregnancy.
+  dr_agebir_mx:
+    seed_source_columns: [dr_agebir_mx]
+    dhs_source_columns: [MOTHER_AGE]
+    source_columns: [MOTHER_AGE]
+    type: continuous
+    status: codebook_supported_candidate
+    note: >
+      Labeled mother's age in years. This supports the maternal-age match;
+      confirm the Seed uses age at birth and the same units.
+  dr_anx_mmh_mx:
+    source_columns: []
+    status: unavailable
+    note: Maternal lifetime anxiety is not present in the listed DHS columns.
+  dr_dep_mmh_mx:
+    source_columns: []
+    status: unavailable
+    note: Maternal lifetime depression is not present in the listed DHS columns.
+  dr_agebir_fx:
+    seed_source_columns: [dr_agebir_fx]
+    dhs_source_columns: [FATHER_AGE]
+    source_columns: [FATHER_AGE]
+    type: continuous
+    status: codebook_supported_candidate
+    note: >
+      Labeled "Husband's Age/Date of Birth: Age in years." Confirm husband
+      denotes the child's father in this cohort and that the Seed definition
+      is age at birth before using as paternal age.
+  DR_pgsASD_CX:
+    source_columns: []
+    status: unavailable
+    note: ASD polygenic risk score is not present in the listed DHS columns.
+
+  dr_sex_cx:
+    seed_source_columns: [SEX]
+    dhs_source_columns: [SEX]
+    source_columns: [SEX]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      source_column: SEX
+      source_to_seed:
+        "M": 1
+        "F": 2
+      seed_categories:
+        1: "Male"
+        2: "Female"
+    note: >
+      Labeled "Sex designation at birth"; the supplied synthetic DHS data use
+      M/F. Map M to Seed 1 (Male) and F to Seed 2 (Female); validate the
+      source representation against each input file.
+  dr_prevlb_br_3c:
+    seed_source_columns: [PRIOR_LIVE, PRIOR_BIRTHS]
+    dhs_source_columns: [LIVE_BIRTH_ORDER]
+    source_columns: [LIVE_BIRTH_ORDER]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      source_column: LIVE_BIRTH_ORDER
+      source_to_seed:
+        "1": 1
+        "2": 2
+        "3": 3
+        "4": 3
+        "5": 3
+        "6": 3
+        "7": 3
+      seed_categories:
+        1: "1 previous livebirth (up to and including index child)"
+        2: "2 previous livebirths (up to and including index child)"
+        3: "3 or more previous livebirths (up to and including index child)"
+    note: >
+      Labeled "Previous Pregnancies: Live birth order," a plausible source for
+      the Seed's three parity categories. Map birth orders 1 and 2 directly
+      and 3 or greater to 3. This assumes live-birth order includes the index
+      child and should be checked for multiple births and the exact DHS
+      definition before substantive use.
+  dr_pg_incpovrat_up_4c:
+    source_columns: []
+    status: unavailable
+    note: >
+      Family income relative to the federal poverty level is not listed.
+      ADI_NATRANK and ADI_STATERNK are deprivation ranks, not equivalent
+      measures, and must not be substituted without a validated methodology.
+  dr_biredu_mx_5c:
+    seed_source_columns: [MEDUC, MOTHER_EDUC]
+    dhs_source_columns: [MOTHER_EDCODE]
+    source_columns: [MOTHER_EDCODE]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      source_column: MOTHER_EDCODE
+      source_to_seed:
+        "1": 1
+        "2": 1
+        "3": 2
+        "4": 3
+        "5": 3
+        "6": 4
+        "7": 5
+        "8": 5
+        "9": null
+      seed_categories:
+        1: "12th grade or less, no diploma"
+        2: "High school graduate or equivalent"
+        3: "Some college, but no degree or less than Bachelor's degree"
+        4: "Bachelor's Degree"
+        5: "Advanced Degree"
+    note: >
+      Recode DHS MOTHER_EDCODE to the Seed categories using source_to_seed.
+      DHS codes 1 and 2 combine as Seed 1; 3 maps to 2; 4 and 5 combine as
+      3; 6 maps to 4; and 7 and 8 combine as 5. DHS code 9 is unknown and
+      must remain missing. Validate source codes and missing-value handling
+      against the data before applying.
+  dr_race_mx_5c:
+    seed_source_columns: [MOTHER_RACE]
+    dhs_source_columns: [MOTHER_HISPANIC_ETHNICITY, MOTHER_BRIDGED_RACE_ETH_CD]
+    source_columns: [MOTHER_HISPANIC_ETHNICITY, MOTHER_BRIDGED_RACE_ETH_CD]
+    type: categorical
+    status: recode_required
+    recode_to_seed:
+      source_column: MOTHER_BRIDGED_RACE_ETH_CD
+      source_to_seed:
+        "1": 1
+        "2": 2
+        "3": 4
+        "4": 3
+        "5": 5
+        "6": 5
+        "7": 5
+        "8": 5
+        "9": null
+      seed_categories:
+        1: "Non-Hispanic, White"
+        2: "Non-Hispanic, Black or African American"
+        3: "Non-Hispanic Asian/Pacific Islander"
+        4: "Non-Hispanic Other, >1 Race"
+        5: "Hispanic"
+    note: >
+      Recode DHS MOTHER_BRIDGED_RACE_ETH_CD to the Seed categories using
+      source_to_seed. DHS codes 5-8 are all Hispanic race groups and map to
+      Seed 5. DHS code 3 (Non-Hispanic American Indian/Alaska Native) is
+      grouped into Seed 4 because Seed has no separate category for it; this
+      is an approximation, not an exact race match. DHS code 9 combines
+      Other and Unknown and must remain missing rather than being treated as
+      a known Seed race category. MOTHER_HISPANIC_ETHNICITY can be used as a
+      consistency check; validate code values and missingness before use.
+  phase:
+    source_columns: []
+    status: unavailable
+    note: Study phase is not present in the listed DHS columns.
+  dr_site:
+    source_columns: []
+    status: unavailable
+    note: Seed study site is not present. Residence county/state are not equivalent.
+  DR_Wave_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotyping wave is not present in the listed DHS columns.
+  DR_gwaPC1_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 1 is not present in the listed DHS columns.
+  DR_gwaPC2_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 2 is not present in the listed DHS columns.
+  DR_gwaPC3_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 3 is not present in the listed DHS columns.
+  DR_gwaPC4_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 4 is not present in the listed DHS columns.
+  DR_gwaPC5_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 5 is not present in the listed DHS columns.
+  DR_gwaPC6_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 6 is not present in the listed DHS columns.
+  DR_gwaPC7_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 7 is not present in the listed DHS columns.
+  DR_gwaPC8_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 8 is not present in the listed DHS columns.
+  DR_gwaPC9_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 9 is not present in the listed DHS columns.
+  DR_gwaPC10_CX:
+    source_columns: []
+    status: unavailable
+    note: Genotype principal component 10 is not present in the listed DHS columns.
+
+outcome:
+  seed_name: DR_FINALCLASS
+  source_columns: []
+  status: unavailable_in_scoring_columns
+  note: >
+    No ASD outcome is listed in the DHS codebook. This is not required to
+    generate predictions, but labeled outcomes are required to assess
+    predictive performance or validate calibration.
