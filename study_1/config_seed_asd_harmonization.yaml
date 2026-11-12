@@ -335,3 +335,60 @@ imputation:
     dr_anx_mmh_mx: [0, 1]
     dr_dep_mmh_mx: [0, 1]
     dr_pg_incpovrat_up_4c: [1, 2, 3, 4]
+
+# Explicitly synthetic BART smoke-test configuration. DHS has no observed ASD
+# outcome; synthetic_asd_flag in the imputed files is not used as a label.
+analysis:
+  output_directory: outputs/dhs_results
+  model_directory: outputs/models
+  identifier: RECORD_ID
+  synthetic_outcome:
+    name: ASD_flag
+    seed: 42
+    prevalence: 0.0108
+    missingness_rate: 0.0027
+  predictors:
+    - name: dr_agebir_mx
+      type: continuous
+    - name: dr_agebir_fx
+      type: continuous
+    - name: dr_gawks
+      type: continuous
+    - name: gest_dm_bin
+      type: categorical
+    - name: DR_PREGHTN
+      type: categorical
+  adjustment_covariates:
+    - dr_sex_cx
+    - dr_prevlb_br_3c
+    - dr_biredu_mx_5c
+    - dr_race_mx_5c
+    - DR_INF_FV_PG_MX
+    - dr_anx_mmh_mx
+    - dr_dep_mmh_mx
+    - dr_pg_incpovrat_up_4c
+    - DR_pgsASD_CX
+    - DR_gwaPC1_CX
+    - DR_gwaPC2_CX
+    - DR_gwaPC3_CX
+    - DR_gwaPC4_CX
+    - DR_gwaPC5_CX
+    - DR_gwaPC6_CX
+    - DR_gwaPC7_CX
+    - DR_gwaPC8_CX
+    - DR_gwaPC9_CX
+    - DR_gwaPC10_CX
+  individual_profile_sample: 100
+  caf_profile_sample: 500
+  # Synthetic demonstration assumption, not an observed DHS population estimate.
+  population_prevalence: 0.0108
+  bart:
+    nchain: 8
+    nskip: 30000
+    ndpost: 12000
+    keepevery: 12
+    seed: 42
+  shapley:
+    n_individuals: 100
+    n_permutations: 20
+    n_donors: 25

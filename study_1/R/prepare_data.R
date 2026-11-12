@@ -119,7 +119,6 @@ coerce_variable_types <- function(raw_df, config) {
 
 
 # -----------------------------------------------------------------------------
-<<<<<<< HEAD
 # harmonize_dhs_to_seed.R
 #
 # Convert the nine shared DHS source fields to the Seed variable names and
@@ -310,8 +309,6 @@ harmonize_dhs_to_seed <- function(
 
 
 # -----------------------------------------------------------------------------
-=======
->>>>>>> 0869421b0764a80c6416ee2ada47e8e4c1c47325
 # add_missingness_indicators.R
 #
 # Description:

@@ -1,0 +1,2 @@
+quantity,rhat,ess_bulk,ess_tail,chains,retained_draws_per_chain
+mean_fitted_probability,1.0333974060474778,21.087036424791872,78.71565306232188,2,100

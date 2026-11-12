@@ -1,0 +1,25 @@
+variable,role,type,missing_after
+dr_agebir_mx,Predictor,continuous,0
+dr_agebir_fx,Predictor,continuous,0
+dr_gawks,Predictor,continuous,0
+gest_dm_bin,Predictor,categorical,0
+DR_PREGHTN,Predictor,categorical,0
+dr_sex_cx,Adjustment covariate,categorical,0
+dr_prevlb_br_3c,Adjustment covariate,categorical,0
+dr_biredu_mx_5c,Adjustment covariate,categorical,0
+dr_race_mx_5c,Adjustment covariate,categorical,0
+DR_INF_FV_PG_MX,Adjustment covariate,categorical,0
+dr_anx_mmh_mx,Adjustment covariate,categorical,0
+dr_dep_mmh_mx,Adjustment covariate,categorical,0
+dr_pg_incpovrat_up_4c,Adjustment covariate,categorical,0
+DR_pgsASD_CX,Adjustment covariate,continuous,0
+DR_gwaPC1_CX,Adjustment covariate,continuous,0
+DR_gwaPC2_CX,Adjustment covariate,continuous,0
+DR_gwaPC3_CX,Adjustment covariate,continuous,0
+DR_gwaPC4_CX,Adjustment covariate,continuous,0
+DR_gwaPC5_CX,Adjustment covariate,continuous,0
+DR_gwaPC6_CX,Adjustment covariate,continuous,0
+DR_gwaPC7_CX,Adjustment covariate,continuous,0
+DR_gwaPC8_CX,Adjustment covariate,continuous,0
+DR_gwaPC9_CX,Adjustment covariate,continuous,0
+DR_gwaPC10_CX,Adjustment covariate,continuous,0

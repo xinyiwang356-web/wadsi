@@ -1,0 +1,2 @@
+stage,input,source_rows,generated_outcome_positive,generated_outcome_missing,analytic_rows,analytic_outcome_prevalence,model_variables,model_value_missing,synthetic_outcome_only
+data preparation complete,C:\Users\XXW306\Cochran_REPO\wadsi\study_1\outputs\imputed_dhs\imputed_dhs_m1.csv,65608,740,167,65441,0.01130789566174111,24,0,TRUE

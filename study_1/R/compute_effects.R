@@ -430,6 +430,8 @@ compute_attributable_fractions <- function(bart_fit, analytic_df, config, irr_re
 #   n_samples     : number of random permutations per individual
 #   n_donors      : number of donor rows used to approximate the expectation
 #                   over unassigned predictors
+#   individual_indices : optional exact rows to decompose
+#   p_ref_indices     : row indices represented by columns of p_ref
 #
 # Output:
 #   list with elements:
@@ -437,6 +439,8 @@ compute_attributable_fractions <- function(bart_fit, analytic_df, config, irr_re
 #     - individual_af_components
 #     - population_feature_shapley
 #     - population_af_components
+#     - individual_shapley_draws
+#     - population_shapley_draws
 # =============================================================================
 compute_shapley_af <- function(bart_fit,
                                analytic_df,
@@ -445,7 +449,9 @@ compute_shapley_af <- function(bart_fit,
                                n_individuals = 5,
                                n_samples = 100,
                                n_donors  = 50,
-                               n_cores   = 1L) {
+                               n_cores   = 1L,
+                               individual_indices = NULL,
+                               p_ref_indices = NULL) {
   
   # ---------------------------------------------------------------------------
   # 1. Basic setup
@@ -484,13 +490,30 @@ compute_shapley_af <- function(bart_fit,
   # 2. Sample individuals first
   # ---------------------------------------------------------------------------
 
-  idx <- sample(seq_len(n_obs), size = min(n_individuals, n_obs), replace = FALSE)
+  if (is.null(individual_indices)) {
+    idx <- sample(seq_len(n_obs), size = min(n_individuals, n_obs), replace = FALSE)
+  } else {
+    idx <- as.integer(individual_indices)
+    if (length(idx) == 0L || anyNA(idx) || any(idx < 1L | idx > n_obs) ||
+        anyDuplicated(idx)) {
+      stop("individual_indices must contain unique valid row indices.")
+    }
+  }
+
+  p_ref_columns <- if (is.null(p_ref_indices)) {
+    idx
+  } else {
+    match(idx, as.integer(p_ref_indices))
+  }
+  if (anyNA(p_ref_columns) || max(p_ref_columns) > ncol(p_ref)) {
+    stop("p_ref must include a column for every selected individual.")
+  }
   
   # ---------------------------------------------------------------------------
   # 3. Reference scenario p(x^*, Z) for selected individuals only
   # ---------------------------------------------------------------------------
 
-  p_ref_draws_sel <- p_ref[, idx, drop = FALSE]
+  p_ref_draws_sel <- p_ref[, p_ref_columns, drop = FALSE]
   n_draws <- nrow(p_ref_draws_sel)
   
   # ---------------------------------------------------------------------------
@@ -736,6 +759,9 @@ compute_shapley_af <- function(bart_fit,
     individual_feature_shapley = shap_individual,
     individual_af_components   = shap_individual_values,
     population_feature_shapley = shap_population,
-    population_af_components   = population_values
+    population_af_components   = population_values,
+    individual_shapley_draws   = lapply(results_list, `[[`, "phi_mat"),
+    individual_indices         = idx,
+    population_shapley_draws   = if (n_cases_used > 0) pop_phi_mat else NULL
   )
 }
