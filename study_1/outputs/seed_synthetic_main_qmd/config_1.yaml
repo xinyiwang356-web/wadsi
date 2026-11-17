@@ -1,0 +1,71 @@
+data_file: C:/Users/XXW306/Cochran_REPO/wadsi/data/synthetic_seed_asd_data.csv
+predictors:
+- name: dr_agebir_mx
+  type: continuous
+- name: dr_agebir_fx
+  type: continuous
+- name: dr_gawks
+  type: continuous
+- name: gest_dm_bin
+  type: categorical
+- name: DR_PREGHTN
+  type: categorical
+- name: dr_anx_mmh_mx
+  type: categorical
+- name: dr_dep_mmh_mx
+  type: categorical
+- name: DR_pgsASD_CX
+  type: continuous
+- name: DR_INF_FV_PG_MX
+  type: categorical
+
+covariates:
+- name: dr_sex_cx
+  type: categorical
+- name: dr_prevlb_br_3c
+  type: categorical
+- name: dr_biredu_mx_5c
+  type: categorical
+- name: dr_race_mx_5c
+  type: categorical
+- name: dr_pg_incpovrat_up_4c
+  type: categorical
+- name: DR_gwaPC1_CX
+  type: continuous
+- name: DR_gwaPC2_CX
+  type: continuous
+- name: DR_gwaPC3_CX
+  type: continuous
+- name: DR_gwaPC4_CX
+  type: continuous
+- name: DR_gwaPC5_CX
+  type: continuous
+- name: DR_gwaPC6_CX
+  type: continuous
+- name: DR_gwaPC7_CX
+  type: continuous
+- name: DR_gwaPC8_CX
+  type: continuous
+- name: DR_gwaPC9_CX
+  type: continuous
+- name: DR_gwaPC10_CX
+  type: continuous
+outcome:
+  name: synthetic_asd_flag
+  type: categorical
+  reference: 0.0
+missingness_indicators: []
+population_priors:
+  pY1: 0.3913628
+  pY0: 0.6086372
+predictor_labels:
+  dr_agebir_mx: dr_agebir_mx
+  dr_agebir_fx: dr_agebir_fx
+  dr_gawks: dr_gawks
+  gest_dm_bin: gest_dm_bin
+  DR_PREGHTN: DR_PREGHTN
+  dr_anx_mmh_mx: dr_anx_mmh_mx
+  dr_dep_mmh_mx: dr_dep_mmh_mx
+  DR_pgsASD_CX: DR_pgsASD_CX
+  DR_INF_FV_PG_MX: DR_INF_FV_PG_MX
+  

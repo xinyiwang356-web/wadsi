@@ -1,0 +1,2 @@
+quantity,rhat,ess_bulk,ess_tail,ess_bulk_per_chain,ess_tail_per_chain,nchain,ndpost
+mean_fitted_probability,0.9999617073712364,7799.7966487315625,7864.89835490445,974.9745810914453,983.1122943630562,8,1000

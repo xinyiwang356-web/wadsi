@@ -1,31 +1,26 @@
-"""SEED-only chained-equation imputation for harmonized SEED/DHS datasets.
+"""Shared helpers for isolated SEED model fitting and DHS-local imputation.
 
-By default, the script reads the synthetic source CSVs, maps the nine
-overlapping DHS fields to SEED definitions, and creates the 15 unavailable DHS
-targets as missing. Each IterativeImputer is fit only on SEED rows and then
-used to transform DHS rows. Categorical variables are one-hot encoded before
-imputation and decoded to valid categories afterward.
-
-Dependencies: numpy, pandas, scikit-learn, and PyYAML.
-
-Run with repository defaults:
-    python study_1/mice_imputer.py
-
-Or supply a previously harmonized combined CSV:
-    python study_1/mice_imputer.py --input-csv harmonized_seed_dhs.csv
+Use ``fit_imputer.py`` in the SEED environment and ``transform_imputer.py``
+in the DHS environment. This module deliberately has no combined-data runner.
 """
 
 from __future__ import annotations
 
-import argparse
+import copy
+import hashlib
+import json
 import logging
 import math
+import platform
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 import yaml
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
@@ -36,6 +31,7 @@ IS_DHS_COLUMN = "is_dhs"
 MAX_ITER = 20
 N_IMPUTATIONS = 5
 RANDOM_STATE = 42
+SCHEMA_VERSION = "1.0"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -127,6 +123,12 @@ def _variable_specs(
                     f"SEED values for {name!r} contain categories absent from "
                     "the YAML specification."
                 )
+            if not any(
+                isinstance(value, str) and value == "Missing"
+                for value in categories
+            ):
+                categories = (*categories, "Missing")
+            keys = [_category_key(value) for value in categories]
             representatives = {
                 _category_key(value): value for value in categories
             }
@@ -266,130 +268,480 @@ def _decode_frame(
     return decoded
 
 
-def impute_harmonized_data(
-    data: pd.DataFrame,
-    config: Mapping[str, Any],
-    target_columns: Sequence[str] | None = None,
-    feature_columns: Sequence[str] | None = None,
-) -> list[pd.DataFrame]:
-    """Fit five SEED-only IterativeImputers and return completed DHS frames."""
-    if IS_DHS_COLUMN not in data:
-        raise ValueError(f"Input data must contain an {IS_DHS_COLUMN!r} column.")
-    if (
-        data[IS_DHS_COLUMN].isna().any()
-        or not data[IS_DHS_COLUMN].isin([0, 1]).all()
-    ):
-        raise ValueError(f"{IS_DHS_COLUMN!r} must contain only nonmissing 0/1 values.")
+def _json_value(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if pd.isna(value):
+        return None
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
+
+def _canonical_json_hash(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _missingness_columns(
+    frame: pd.DataFrame,
+    variable_names: Sequence[str],
+    indicator_names: Sequence[str] | None = None,
+) -> tuple[np.ndarray, list[str]]:
+    names = list(indicator_names) if indicator_names is not None else [
+        name for name in variable_names if frame[name].isna().any()
+    ]
+    indicators = np.column_stack(
+        [frame[name].isna().to_numpy(dtype=float) for name in names]
+    ) if names else np.empty((len(frame), 0), dtype=float)
+    return indicators, [f"__missing__{name}" for name in names]
+
+
+def _encode_with_missingness(
+    frame: pd.DataFrame,
+    specs: Mapping[str, VariableSpec],
+    categorical_columns: Mapping[str, tuple[tuple[str, Any], ...]],
+    indicator_variables: Sequence[str],
+) -> tuple[np.ndarray, list[str], np.ndarray, np.ndarray]:
+    encoded, names, minimums, maximums = _encode_frame(
+        frame, specs, categorical_columns
+    )
+    indicators, indicator_names = _missingness_columns(
+        frame, list(specs), indicator_variables
+    )
+    if indicators.shape[1]:
+        encoded = np.column_stack((encoded, indicators))
+        names.extend(indicator_names)
+        minimums = np.concatenate((minimums, np.zeros(indicators.shape[1])))
+        maximums = np.concatenate((maximums, np.ones(indicators.shape[1])))
+    return encoded, names, minimums, maximums
+
+
+def fit_seed_imputers(
+    seed_data: pd.DataFrame,
+    config: Mapping[str, Any],
+    n_imputations: int = N_IMPUTATIONS,
+    random_state: int = RANDOM_STATE,
+    max_iter: int = MAX_ITER,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fit portable imputation models using SEED rows only.
+
+    The returned bundle contains fitted BayesianRidge estimator state and
+    aggregate initialization statistics, but never the input dataframe.
+    """
+    if n_imputations < 1:
+        raise ValueError("n_imputations must be positive.")
+    if max_iter < 1:
+        raise ValueError("max_iter must be positive.")
+    if random_state < 0:
+        raise ValueError("random_state must be nonnegative.")
     imputation = config.get("imputation", {})
-    imputation = imputation if isinstance(imputation, Mapping) else {}
-    if target_columns is None:
-        target_columns = imputation.get("target_variables")
-    if not target_columns:
-        raise ValueError(
-            "Specify target_columns or imputation.target_variables in the YAML."
-        )
-    if feature_columns is None:
-        feature_columns = imputation.get("overlap_variables")
-    if feature_columns is None:
-        feature_columns = [
-            name
-            for name, spec in _variable_metadata(config).items()
-            if isinstance(spec, Mapping)
-            and spec.get("type") in {"continuous", "categorical", "ordinal", "binary"}
-            and spec.get("status") != "unavailable"
-            and name not in target_columns
-        ]
-    if not feature_columns:
-        raise ValueError(
-            "Specify feature_columns or imputation.overlap_variables in the YAML."
-        )
+    if not isinstance(imputation, Mapping):
+        raise ValueError("The harmonization YAML must define an 'imputation' mapping.")
+    feature_columns = list(imputation.get("overlap_variables", []))
+    target_columns = list(imputation.get("target_variables", []))
     if len(feature_columns) != 9 or len(target_columns) != 15:
         raise ValueError("The imputation pipeline requires 9 overlaps and 15 targets.")
-    variable_names = list(feature_columns) + list(target_columns)
+    variable_names = feature_columns + target_columns
     if len(set(variable_names)) != len(variable_names):
         raise ValueError("Feature and target columns must be distinct.")
-    missing_columns = set(variable_names + [IS_DHS_COLUMN]) - set(data.columns)
+    if IS_DHS_COLUMN in seed_data and not seed_data[IS_DHS_COLUMN].eq(0).all():
+        raise ValueError("The SEED fit input may contain only is_dhs == 0 rows.")
+    missing_columns = set(variable_names) - set(seed_data.columns)
     if missing_columns:
         raise ValueError(
-            "Harmonized input is missing required columns: "
+            "SEED data lack required variables: "
             + ", ".join(sorted(missing_columns))
         )
+    if seed_data.empty:
+        raise ValueError("SEED fit input contains no rows.")
 
-    seed_mask = data[IS_DHS_COLUMN].eq(0)
-    dhs_mask = data[IS_DHS_COLUMN].eq(1)
-    if not seed_mask.any() or not dhs_mask.any():
-        raise ValueError("Input must contain at least one SEED and one DHS row.")
-    seed_frame = data.loc[seed_mask, variable_names].copy().reset_index(drop=True)
-    dhs_frame = data.loc[dhs_mask, variable_names].copy().reset_index(drop=True)
-    LOGGER.info(
-        "Splitting data: %d SEED reference rows and %d DHS target rows.",
-        len(seed_frame),
-        len(dhs_frame),
-    )
+    # Select only configured variables; identifiers and unrelated columns are
+    # never passed into preprocessing or retained in the returned bundle.
+    seed_frame = seed_data.loc[:, variable_names].copy()
     specs = _variable_specs(variable_names, seed_frame, config)
     categorical_columns = _category_columns(specs)
-    seed_encoded, encoded_names, minimums, maximums = _encode_frame(
-        seed_frame, specs, categorical_columns
+    indicator_variables = variable_names
+    seed_encoded, encoded_names, minimums, maximums = _encode_with_missingness(
+        seed_frame,
+        specs,
+        categorical_columns,
+        indicator_variables,
     )
-    dhs_encoded, dhs_encoded_names, _, _ = _encode_frame(
-        dhs_frame, specs, categorical_columns
-    )
-    if encoded_names != dhs_encoded_names:
-        raise RuntimeError("SEED and DHS encoded variables are not aligned.")
     if np.isnan(seed_encoded).all(axis=0).any():
-        raise ValueError("At least one encoded variable has no observed SEED values.")
-    missing_targets = int(dhs_frame[list(target_columns)].isna().sum().sum())
-    LOGGER.info(
-        "DHS target missingness before imputation: %d / %d cells.",
-        missing_targets,
-        len(dhs_frame) * len(target_columns),
-    )
+        empty_columns = [
+            encoded_names[index]
+            for index in np.flatnonzero(np.isnan(seed_encoded).all(axis=0))
+        ]
+        raise ValueError(
+            "SEED has no observed values for encoded feature(s): "
+            + ", ".join(empty_columns)
+        )
 
-    results: list[pd.DataFrame] = []
-    for number in range(1, N_IMPUTATIONS + 1):
+    # IterativeImputer only learns conditional models for columns missing at
+    # fit time. A small deterministic SEED-only holdout gives fully observed
+    # variables a conditional model when they are entirely missing in DHS.
+    artificial_masking: dict[str, Any] = {
+        "enabled": False,
+        "fraction": 0.05,
+        "variables": [],
+        "random_state": random_state,
+    }
+    if len(seed_frame) > 1:
+        seed_rng = np.random.RandomState(random_state)
+        variable_encoded_columns: dict[str, list[int]] = {}
+        encoded_index = {name: index for index, name in enumerate(encoded_names)}
+        for name, spec in specs.items():
+            if spec.kind == "continuous":
+                variable_encoded_columns[name] = [encoded_index[name]]
+            else:
+                variable_encoded_columns[name] = [
+                    encoded_index[encoded_name]
+                    for encoded_name, _ in categorical_columns[name]
+                ]
+        masked_variables: list[str] = []
+        mask_count = min(
+            len(seed_frame) - 1,
+            max(1, int(round(len(seed_frame) * artificial_masking["fraction"]))),
+        )
+        for name in variable_names:
+            if seed_frame[name].isna().any():
+                continue
+            row_indices = seed_rng.choice(
+                len(seed_frame), size=mask_count, replace=False
+            )
+            seed_encoded[np.ix_(row_indices, variable_encoded_columns[name])] = np.nan
+            masked_variables.append(name)
+        artificial_masking.update(
+            enabled=bool(masked_variables),
+            variables=masked_variables,
+        )
+
+    fitted_imputers: list[IterativeImputer] = []
+    for number in range(n_imputations):
+        seed = random_state + number
         LOGGER.info(
-            "Imputation %d/%d: fitting IterativeImputer on SEED only "
+            "Imputation %d/%d: fitting on %d SEED rows only "
             "(max_iter=%d; random_state=%d).",
-            number,
-            N_IMPUTATIONS,
-            MAX_ITER,
-            RANDOM_STATE,
+            number + 1,
+            n_imputations,
+            len(seed_frame),
+            max_iter,
+            seed,
         )
         imputer = IterativeImputer(
             estimator=BayesianRidge(),
-            max_iter=MAX_ITER,
+            max_iter=max_iter,
             sample_posterior=True,
-            random_state=RANDOM_STATE + number - 1,
+            random_state=seed,
             min_value=minimums,
             max_value=maximums,
             verbose=2,
         )
         imputer.fit(seed_encoded)
+        fitted_imputers.append(imputer)
         LOGGER.info(
             "Imputation %d: SEED fit complete after %d iteration(s); "
             "%d conditional estimators learned.",
-            number,
+            number + 1,
             imputer.n_iter_,
             len(imputer.imputation_sequence_),
         )
-        completed_encoded = imputer.transform(dhs_encoded)
+
+    variable_specs = {
+        name: {
+            "type": spec.kind,
+            "categories": [_json_value(value) for value in (spec.categories or ())],
+            "bounds": list(spec.bounds) if spec.bounds is not None else None,
+            "source_dtype": str(seed_frame[name].dtype),
+            "missing_level": "Missing" if spec.kind == "categorical" else None,
+        }
+        for name, spec in specs.items()
+    }
+    categorical_columns_json = {
+        name: [
+            {"encoded_name": encoded_name, "value": _json_value(value)}
+            for encoded_name, value in columns
+        ]
+        for name, columns in categorical_columns.items()
+    }
+    analysis = config.get("analysis", {})
+    analysis = analysis if isinstance(analysis, Mapping) else {}
+    variable_metadata = _variable_metadata(config)
+    dhs_mapping = {
+        name: variable_metadata[name]
+        for name in feature_columns
+        if name in variable_metadata
+    }
+    dhs_required_columns = list(dict.fromkeys(
+        source
+        for specification in dhs_mapping.values()
+        for source in specification.get("dhs_source_columns", [])
+    ))
+    identifier = analysis.get("identifier")
+    factor_levels = {
+        name: [_json_value(value) for value in (spec.categories or ())]
+        for name, spec in specs.items()
+        if spec.kind == "categorical"
+    }
+    manifest: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "imputer": {
+            "class": "sklearn.impute.IterativeImputer",
+            "estimator": "sklearn.linear_model.BayesianRidge",
+            "max_iter": max_iter,
+            "n_imputations": n_imputations,
+            "sample_posterior": True,
+            "random_state_base": random_state,
+            "random_states": [
+                random_state + number for number in range(n_imputations)
+            ],
+            "sklearn_version": sklearn.__version__,
+            "numpy_version": np.__version__,
+            "joblib_version": joblib.__version__,
+            "python_version": platform.python_version(),
+        },
+        "input_schema": {
+            "variable_order": variable_names,
+            "feature_columns": feature_columns,
+            "target_columns": target_columns,
+            "encoded_column_order": encoded_names,
+            "variable_specs": variable_specs,
+            "categorical_factor_levels": factor_levels,
+            "categorical_encodings": categorical_columns_json,
+            "missingness_indicator_variables": indicator_variables,
+            "missingness_indicator_columns": [
+                f"__missing__{name}" for name in indicator_variables
+            ],
+            "continuous_scaling": "none",
+            "artificial_masking": artificial_masking,
+            "dhs_source_columns": dhs_required_columns,
+            "dhs_identifier_column": identifier,
+            "dhs_overlap_mapping": dhs_mapping,
+        },
+        "privacy": {
+            "training_rows_serialized": False,
+            "identifiers_serialized": False,
+            "donor_rows_serialized": False,
+            "estimator_family": "parametric BayesianRidge; no PMM donor pool",
+        },
+    }
+    schema_sha256 = _canonical_json_hash(manifest)
+    bundle: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "schema_sha256": schema_sha256,
+        "imputers": fitted_imputers,
+        "encoded_column_order": encoded_names,
+        "variable_order": variable_names,
+        "feature_columns": feature_columns,
+        "target_columns": target_columns,
+        "variable_specs": variable_specs,
+        "categorical_encodings": categorical_columns_json,
+        "missingness_indicator_variables": indicator_variables,
+        "minimums": minimums,
+        "maximums": maximums,
+    }
+    return bundle, manifest
+
+
+def save_imputer_artifacts(
+    bundle: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    bundle_path: Path,
+    manifest_path: Path,
+) -> dict[str, str]:
+    """Write a fitted artifact and a detached SHA-256-protected manifest."""
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(dict(bundle), bundle_path, compress=3)
+    final_manifest = copy.deepcopy(dict(manifest))
+    final_manifest["integrity"] = {
+        "bundle_sha256": _sha256_file(bundle_path),
+        "schema_sha256": _canonical_json_hash(final_manifest),
+        "bundle_file": bundle_path.name,
+    }
+    manifest_path.write_text(
+        json.dumps(final_manifest, indent=2, ensure_ascii=False, allow_nan=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    return final_manifest["integrity"]
+
+
+def load_imputer_artifacts(
+    bundle_path: Path,
+    manifest_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load artifacts only after validating their integrity and schema version."""
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported schema version {manifest.get('schema_version')!r}; "
+            f"expected {SCHEMA_VERSION!r}."
+        )
+    integrity = manifest.get("integrity", {})
+    expected_bundle_hash = integrity.get("bundle_sha256")
+    actual_bundle_hash = _sha256_file(bundle_path)
+    if not expected_bundle_hash or actual_bundle_hash != expected_bundle_hash:
+        raise ValueError("Imputer bundle SHA-256 verification failed.")
+    manifest_payload = {key: value for key, value in manifest.items() if key != "integrity"}
+    expected_schema_hash = integrity.get("schema_sha256")
+    if (
+        not expected_schema_hash
+        or _canonical_json_hash(manifest_payload) != expected_schema_hash
+    ):
+        raise ValueError("Schema manifest SHA-256 verification failed.")
+    fitted_sklearn_version = manifest.get("imputer", {}).get("sklearn_version")
+    if fitted_sklearn_version != sklearn.__version__:
+        raise ValueError(
+            "Imputer bundle requires scikit-learn "
+            f"{fitted_sklearn_version!r}; found {sklearn.__version__!r}."
+        )
+    bundle = joblib.load(bundle_path)
+    if bundle.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("Bundle and manifest schema versions differ.")
+    if bundle.get("schema_sha256") != expected_schema_hash:
+        raise ValueError("Bundle does not match the schema manifest.")
+    return bundle, manifest
+
+
+def harmonize_dhs_only(
+    dhs_data: pd.DataFrame,
+    manifest: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Validate and harmonize DHS locally, without loading SEED records."""
+    if IS_DHS_COLUMN in dhs_data.columns and not dhs_data[IS_DHS_COLUMN].eq(1).all():
+        raise ValueError("DHS transform input may contain only is_dhs == 1 rows.")
+    schema = manifest["input_schema"]
+    required = list(schema["dhs_source_columns"])
+    identifier = schema.get("dhs_identifier_column")
+    if identifier and identifier in dhs_data.columns:
+        required.append(identifier)
+    missing = set(required) - set(dhs_data.columns)
+    if missing:
+        raise ValueError(
+            "DHS input is missing required columns: " + ", ".join(sorted(missing))
+        )
+    metadata = schema["dhs_overlap_mapping"]
+    harmonized = pd.DataFrame(index=dhs_data.index)
+    for name in schema["feature_columns"]:
+        specification = metadata.get(name)
+        if not isinstance(specification, Mapping):
+            raise ValueError(f"No DHS harmonization mapping stored for {name!r}.")
+        harmonized[name] = _recode_dhs_overlap(dhs_data, name, specification)
+    for name in schema["target_columns"]:
+        harmonized[name] = np.nan
+    if identifier and identifier in dhs_data.columns:
+        harmonized.insert(0, identifier, dhs_data[identifier].to_numpy())
+    harmonized[IS_DHS_COLUMN] = 1
+    return harmonized.reset_index(drop=True)
+
+
+def transform_dhs_data(
+    dhs_data: pd.DataFrame,
+    bundle: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+) -> list[pd.DataFrame]:
+    """Apply frozen SEED models to DHS rows only."""
+    schema = manifest["input_schema"]
+    variable_names = list(bundle["variable_order"])
+    missing_columns = set(variable_names) - set(dhs_data.columns)
+    if missing_columns:
+        raise ValueError(
+            "Harmonized DHS input lacks required variables: "
+            + ", ".join(sorted(missing_columns))
+        )
+    if dhs_data.empty:
+        raise ValueError("DHS transform input contains no rows.")
+    if IS_DHS_COLUMN in dhs_data.columns and not dhs_data[IS_DHS_COLUMN].eq(1).all():
+        raise ValueError("DHS transform input may contain only is_dhs == 1 rows.")
+    identifier = schema.get("dhs_identifier_column")
+    identifier_values = None
+    if identifier and identifier in dhs_data.columns:
+        identifier_values = dhs_data[identifier].copy().reset_index(drop=True)
+
+    frame = dhs_data.loc[:, variable_names].copy().reset_index(drop=True)
+    specs = {
+        name: VariableSpec(
+            name=name,
+            kind=specification["type"],
+            categories=tuple(specification["categories"])
+            if specification["type"] == "categorical"
+            else None,
+            bounds=tuple(specification["bounds"])
+            if specification["bounds"] is not None
+            else None,
+        )
+        for name, specification in bundle["variable_specs"].items()
+    }
+    categorical_columns = {
+        name: tuple(
+            (item["encoded_name"], item["value"])
+            for item in columns
+        )
+        for name, columns in bundle["categorical_encodings"].items()
+    }
+    encoded, encoded_names, _, _ = _encode_with_missingness(
+        frame,
+        specs,
+        categorical_columns,
+        bundle["missingness_indicator_variables"],
+    )
+    if encoded_names != bundle["encoded_column_order"]:
+        raise ValueError(
+            "DHS feature ordering does not match the fitted schema manifest."
+        )
+    empty_predictors = [
+        name for name in bundle["feature_columns"] if frame[name].isna().all()
+    ]
+    if empty_predictors:
+        raise ValueError(
+            "DHS has no observed values for required predictor(s): "
+            + ", ".join(empty_predictors)
+        )
+
+    completed_sets: list[pd.DataFrame] = []
+    random_states = manifest["imputer"]["random_states"]
+    if len(random_states) != len(bundle["imputers"]):
+        raise ValueError("Imputer count does not match manifest random-state list.")
+    for number, (fitted_imputer, random_state) in enumerate(
+        zip(bundle["imputers"], random_states, strict=True),
+        start=1,
+    ):
+        # Reset a deep copy to a known RNG state so a fresh CLI process always
+        # produces the same m-th completed dataset.
+        local_imputer = copy.deepcopy(fitted_imputer)
+        local_imputer.random_state = int(random_state)
+        completed_encoded = local_imputer.transform(encoded)
         completed_variables = _decode_frame(
             completed_encoded,
-            dhs_frame,
+            frame,
             specs,
             encoded_names,
             categorical_columns,
         )
-        missing = completed_variables[list(target_columns)].isna().sum()
-        if missing.any():
+        if completed_variables[list(bundle["target_columns"])].isna().any().any():
             raise RuntimeError(
-                "Imputation left missing target values: "
-                + ", ".join(
-                    f"{name}={count}"
-                    for name, count in missing.items()
-                    if count
-                )
+                f"Imputation {number} left missing DHS target values."
             )
         for name, spec in specs.items():
             if spec.kind == "categorical":
@@ -402,7 +754,7 @@ def impute_harmonized_data(
                 }
                 if found_categories - valid_categories:
                     raise RuntimeError(
-                        f"Invalid category generated for {name!r}: "
+                        f"Invalid category in {name!r}: "
                         f"{sorted(found_categories - valid_categories)}."
                     )
             else:
@@ -410,21 +762,29 @@ def impute_harmonized_data(
                 numeric = pd.to_numeric(completed_variables[name], errors="raise")
                 if ((numeric < lower) | (numeric > upper)).any():
                     raise RuntimeError(
-                        f"Imputed values for {name!r} violate bounds {lower}, {upper}."
+                        f"Values for {name!r} violate bounds {lower}, {upper}."
                     )
 
-        completed = data.loc[dhs_mask].copy().reset_index(drop=True)
-        for name in variable_names:
-            completed[name] = completed_variables[name].to_numpy()
-        results.append(completed)
+        completed = completed_variables.copy()
+        if identifier_values is not None:
+            completed.insert(0, identifier, identifier_values.to_numpy())
+        completed[IS_DHS_COLUMN] = 1
+        indicator_values, indicator_names = _missingness_columns(
+            frame,
+            variable_names,
+            bundle["missingness_indicator_variables"],
+        )
+        for index, name in enumerate(indicator_names):
+            completed[name] = indicator_values[:, index].astype(np.int8)
+        completed_sets.append(completed)
         LOGGER.info(
-            "Imputation %d/%d complete: %d DHS rows; all 15 target columns "
-            "contain zero missing values.",
+            "Transform imputation %d/%d complete: %d DHS rows; "
+            "all target values populated.",
             number,
-            N_IMPUTATIONS,
+            len(bundle["imputers"]),
             len(completed),
         )
-    return results
+    return completed_sets
 
 
 def _load_yaml(path: Path) -> Mapping[str, Any]:
@@ -512,124 +872,8 @@ def _recode_dhs_overlap(
     )
 
 
-def load_and_harmonize(
-    seed_csv: Path,
-    dhs_csv: Path,
-    config: Mapping[str, Any],
-) -> pd.DataFrame:
-    """Return combined source rows with 9 mapped overlaps and 15 target fields."""
-    imputation = config.get("imputation")
-    if not isinstance(imputation, Mapping):
-        raise ValueError("The harmonization YAML must define an 'imputation' mapping.")
-    overlap_variables = imputation.get("overlap_variables")
-    target_variables = imputation.get("target_variables")
-    if len(overlap_variables or []) != 9 or len(target_variables or []) != 15:
-        raise ValueError("The YAML must define exactly 9 overlaps and 15 targets.")
-    variable_columns = list(overlap_variables) + list(target_variables)
-
-    seed_data = pd.read_csv(seed_csv)
-    dhs_data = pd.read_csv(dhs_csv)
-    missing_seed = set(variable_columns) - set(seed_data.columns)
-    if missing_seed:
-        raise ValueError(
-            "SEED data lack required variables: " + ", ".join(sorted(missing_seed))
-        )
-    metadata = _variable_metadata(config)
-    dhs_harmonized = pd.DataFrame(index=dhs_data.index)
-    for name in overlap_variables:
-        specification = metadata.get(name)
-        if not isinstance(specification, Mapping):
-            raise ValueError(f"No YAML mapping is defined for {name!r}.")
-        dhs_harmonized[name] = _recode_dhs_overlap(
-            dhs_data, name, specification
-        )
-    for name in target_variables:
-        dhs_harmonized[name] = np.nan
-
-    seed_harmonized = seed_data[variable_columns].copy()
-    seed_harmonized[IS_DHS_COLUMN] = 0
-    dhs_harmonized[IS_DHS_COLUMN] = 1
-    if "synthetic_row_id" in seed_data:
-        seed_harmonized.insert(
-            0, "synthetic_row_id", seed_data["synthetic_row_id"].to_numpy()
-        )
-    if "RECORD_ID" in dhs_data:
-        dhs_harmonized.insert(0, "RECORD_ID", dhs_data["RECORD_ID"].to_numpy())
-    if "synthetic_asd_flag" in seed_data:
-        seed_harmonized["synthetic_asd_flag"] = seed_data["synthetic_asd_flag"]
-    combined = pd.concat([seed_harmonized, dhs_harmonized], ignore_index=True, sort=False)
-    LOGGER.info(
-        "Harmonized %d SEED and %d DHS rows: 9 overlaps and 15 targets.",
-        len(seed_data),
-        len(dhs_data),
-    )
-    LOGGER.info(
-        "DHS starts with %d/%d target cells missing.",
-        len(dhs_data) * len(target_variables),
-        len(dhs_data) * len(target_variables),
-    )
-    return combined
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--input-csv",
-        type=Path,
-        help="Optional pre-harmonized combined CSV; defaults to loading source files.",
-    )
-    parser.add_argument(
-        "--seed-csv",
-        type=Path,
-        default=REPOSITORY_ROOT / "data" / "synthetic_seed_asd_data.csv",
-        help="SEED reference CSV used without --input-csv.",
-    )
-    parser.add_argument(
-        "--dhs-csv",
-        type=Path,
-        default=(
-            REPOSITORY_ROOT
-            / "study_1"
-            / "synthetic_demo"
-            / "data"
-            / "synthetic_validation_data.csv"
-        ),
-        help="DHS input CSV used without --input-csv.",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=REPOSITORY_ROOT
-        / "study_1"
-        / "config_seed_asd_harmonization.yaml",
-        help="YAML file with mappings, variable types, categories, and bounds.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=REPOSITORY_ROOT / "study_1" / "outputs" / "imputed_dhs",
-        help="Directory for imputed_dhs_m1.csv through imputed_dhs_m5.csv.",
-    )
-    args = parser.parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    config = _load_yaml(args.config)
-    if args.input_csv:
-        combined = pd.read_csv(args.input_csv)
-        LOGGER.info("Loaded pre-harmonized combined data from %s.", args.input_csv)
-    else:
-        combined = load_and_harmonize(args.seed_csv, args.dhs_csv, config)
-
-    imputations = impute_harmonized_data(combined, config)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    for number, completed in enumerate(imputations, start=1):
-        output_path = args.output_dir / f"imputed_dhs_m{number}.csv"
-        completed.to_csv(output_path, index=False)
-        LOGGER.info("Saved completed DHS dataset: %s", output_path)
-    return 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(
+        "mice_imputer.py is a shared library; run fit_imputer.py in the SEED "
+        "environment and transform_imputer.py in the DHS environment."
+    )

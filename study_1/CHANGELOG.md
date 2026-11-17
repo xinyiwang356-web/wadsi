@@ -26,9 +26,9 @@ participant data or scientific estimates.
   [`config_seed_asd_harmonization.yaml`](config_seed_asd_harmonization.yaml).
   It defines nine overlapping variables and fifteen SEED variables unavailable
   in DHS that are treated as imputation targets.
-- Added [`mice_imputer.py`](mice_imputer.py) to combine the synthetic SEED
-  reference records with the harmonized DHS records, mark their source with
-  `is_dhs`, and create the target columns as missing for DHS.
+- Initially added [`mice_imputer.py`](mice_imputer.py) as the combined-source
+  imputation workflow. Its legacy combined-data CLI and stacking helpers have
+  since been retired in favor of the isolated fit/transform CLIs below.
 - Fit five `IterativeImputer` models using SEED rows only (`max_iter=20`,
   posterior sampling, and deterministic per-imputation seeds based on 42).
   The DHS rows are transformed using those SEED-fitted models and do not
@@ -41,6 +41,40 @@ participant data or scientific estimates.
   passed.
 - The default output directory is `study_1/outputs/imputed_dhs/`. The full-size
   outputs were committed on the published `xw_synthetic_v1` branch.
+- Added [`fit_imputer.py`](fit_imputer.py) and
+  [`transform_imputer.py`](transform_imputer.py) for separate SEED-only model
+  fitting and DHS-local transformation. The fit command exports fitted
+  BayesianRidge/IterativeImputer state and a schema manifest without training
+  rows, identifiers, or donor records. The manifest records column ordering,
+  dtypes, category levels (including a reserved `Missing` level), bounds,
+  missingness indicators, DHS source mappings, and artifact SHA-256 values.
+- The transform command reads only the DHS input and the model artifacts,
+  checks the manifest and input schema, applies DHS mappings locally, and
+  writes five DHS datasets by default. Fully observed SEED variables are
+  deterministically masked on a small training-only subset so their conditional
+  models can impute variables that are entirely missing in DHS.
+- Example commands:
+
+  ```powershell
+  python study_1/fit_imputer.py `
+    --seed-csv data/synthetic_seed_asd_data.csv
+  python study_1/transform_imputer.py `
+    --dhs-csv study_1/synthetic_demo/data/synthetic_validation_data.csv
+  ```
+
+- **Artifact handling:** `joblib` bundles must be loaded only from trusted
+  sources; SHA-256 checks detect mismatched or corrupted files but do not
+  authenticate the publisher. Transfer the bundle and manifest together.
+- Added focused isolation, schema, deterministic-transform, missingness, and
+  artifact-integrity tests in [`test_imputer_isolation.py`](test_imputer_isolation.py).
+- **Full-size isolated run completed 2026-11-11:** fit all five models on the
+  5,210-row SEED reference dataset with `max_iter=20` and seeds 42–46, then
+  transformed all 65,608 DHS rows. Outputs are in
+  [`outputs/imputed_dhs_isolated/`](outputs/imputed_dhs_isolated/); each of the
+  five files has zero missing values across all 15 target variables and passed
+  configured category and bound checks. The matching bundle and manifest are
+  in [`outputs/imputer_artifacts/`](outputs/imputer_artifacts/). The earlier
+  `outputs/imputed_dhs/` files were left unchanged.
 
 ### DHS BART pipeline preparation
 
